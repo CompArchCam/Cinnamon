@@ -21,9 +21,9 @@ Section 2: Compile Sample Program using Cinnamon:
 Cinnamon sample programs are available under tests/ directory.
 The following commands will compile cinnamon program ins.dsl and integrate the resulting code into respective frameworks. You will need to set the path to your target framework installation in the respective scripts.
 
-$ $CINNAMON_ROOT/Scripts/compileToJanus.py $CINNAMON_SRC/tests/ins.dsl
-$ $CINNAMON_ROOT/Scripts/compileToPin.py $CINNAMON_SRC/tests/ins.dsl
-$ $CINNAMON_ROOT/Scripts/compileToDyninst.py $CINNAMON_SRC/tests/ins.dsl
+$ $CINNAMON_ROOT/Scripts/compileToJanus.py $CINNAMON_ROOT/tests/ins.dsl
+$ $CINNAMON_ROOT/Scripts/compileToPin.py $CINNAMON_ROOT/tests/ins.dsl
+$ $CINNAMON_ROOT/Scripts/compileToDyninst.py $CINNAMON_ROOT/tests/ins.dsl
 
 After this, the final tool can be built and run using the target framework's build instructions.
 
