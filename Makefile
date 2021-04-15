@@ -1,19 +1,18 @@
-CNMNHOME=$(HOME)/cinnamon
 SRC=
 ARG=
 #ifndef TARGET
 #$(error TARGET is not set. set it to pin, janus or dyninst)
 #endif
 ifeq ($(TARGET),pin)
-    SRC = $(CNMNHOME)/codegen-pin
+    SRC = codegen-pin
     ARG=TARGET_PIN
 endif
 ifeq ($(TARGET),janus)
-    SRC = $(CNMNHOME)/codegen-janus
+    SRC = codegen-janus
     ARG=TARGET_JANUS
 endif
 ifeq ($(TARGET),dyninst)
-    SRC = $(CNMNHOME)/codegen-dyninst
+    SRC = codegen-dyninst
     ARG=TARGET_DYN
 endif
 bdc: main.cpp parser.cpp lexer.cpp AST.o CodeGen.o
