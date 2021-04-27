@@ -94,7 +94,7 @@ You can get the relevant files for `Dyninst`  with placeholders, templates and u
 
 Copy ``MyDSLTool`` folder from ``dyn-cinnamon`` under ``path-to-your-dyn-root-dir/examples``
 
-in ``compileToDyn.py``, set ``DynPATH=path-to-your-dyn-root-dir/examples/MyDSLTool``
+, Set ``DynPATH=path-to-your-dyn-root-dir/examples/MyDSLTool`` in ``compileToDyn.py``
 
 Once the code for `Dyninst` has been generated and integrated by running `compileToDyn.py` script in Section 2, you can build the final tool using the following commands:
 
@@ -103,9 +103,11 @@ Once the code for `Dyninst` has been generated and integrated by running `compil
 `` make``
 
 Run the tool using the following command :
+
 a) Generate statically instrumented binary. 
 
 `` path-to-your-dyn-root-dir/examples/MyDSLTool/DSLtool -m static -o <output_binary> <input_binary>``
 
 b) Execute/Run the output_binary
+
 `` <output_binary> <args>``
