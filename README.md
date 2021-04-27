@@ -102,6 +102,10 @@ Once the code for `Dyninst` has been generated and integrated by running `compil
 
 `` make``
 
-run the tool using the following command 
+Run the tool using the following command :
+a) Generate statically instrumented binary. 
 
 `` path-to-your-dyn-root-dir/examples/MyDSLTool/DSLtool -m static -o <output_binary> <input_binary>``
+
+b) Execute/Run the output_binary
+`` <output_binary> <args>``
