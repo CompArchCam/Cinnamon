@@ -18,5 +18,8 @@ tests/*.bbl
 tests/*.img
 tests/*.ins
 tests/*.rtn
+tests/*.instr
+tests/*.temp
+tests/*.loader
 tests/*.ptype
 tests/temp.cpp
