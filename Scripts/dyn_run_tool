@@ -16,7 +16,7 @@ fi
 
 dyn_root=your-path-to/dyninst-10.1.0
 tool_src=$dyn_root/examples/MyDSLTool
-export DYNINST_ROOT=your-path-to/dyninst-10.1.0/build
+export DYNINST_ROOT=$dyn_root/build
 export DYNINSTAPI_RT_LIB=$dyn_root/build/lib/libdyninstAPI_RT.so
 export LD_LIBRARY_PATH=$dyn_root/build/lib:$LD_LIBRARY_PATH
 
