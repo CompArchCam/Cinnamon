@@ -1,0 +1,8 @@
+#!/bin/bash     
+
+pin_root=your-path-to/pin-3.13
+tool_src=$pin_root/source/tool/MyDSLTool
+cd $tool_src
+echo "Building pin tool........"
+make obj-intel64/MyDSLTool.so
+

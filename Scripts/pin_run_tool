@@ -1,0 +1,29 @@
+#!/bin/bash     
+
+my_dir="$(dirname "$0")"
+pin_root=your-path-to/pin-3.13
+tool_src=$pin_root/source/tools/MyDSLTool
+function usage {
+    echo "Run pin tool"
+    echo "Usage: "
+    echo "pin_run_tool <executable> [executable_args ...]"
+}
+
+if [ $# -lt "1" ]
+then 
+    usage
+    exit
+fi
+
+binfile=$1
+shift
+
+if [ -f $binfile ];
+then
+   echo "Found executable $binfile"
+else
+   echo "Executable $binfile does not exist in the binaries folder."
+   exit
+fi
+
+$pin_root/pin -t $tool_src/obj-intel64/MyDSLTool.so -- $binfile $*

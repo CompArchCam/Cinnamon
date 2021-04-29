@@ -1,0 +1,58 @@
+#!/bin/bash     
+
+my_dir="$(dirname "$0")"
+
+function usage {
+    echo "Running dyninst tool"
+    echo "Usage: "
+    echo "dyn_run_tool <executable> [executable_args ...]"
+}
+
+if [ $# -lt "1" ]
+then 
+    usage
+    exit
+fi
+
+dyn_root=your-path-to/dyninst-10.1.0
+tool_src=$dyn_root/examples/MyDSLTool
+export DYNINST_ROOT=your-path-to/dyninst-10.1.0/build
+export DYNINSTAPI_RT_LIB=$dyn_root/build/lib/libdyninstAPI_RT.so
+export LD_LIBRARY_PATH=$dyn_root/build/lib:$LD_LIBRARY_PATH
+
+binfile=$1
+shift
+
+echo "current dir"
+bin_dir="$(dirname "${binfile}")"
+echo "$bin_dir"
+#echo "$(basename "${VAR}")"
+echo "binfile"
+echo "$binfile"
+
+bininstr="$binfile-re"
+rm -f $bininstr
+
+if [ -f $binfile ];
+then
+   echo "Found executable $binfile"
+else
+   echo "Executable $binfile does not exist in the binaries folder."
+   exit
+fi
+echo "instrumented"
+echo "$bininstr"
+#rm -f $bin_dir/libInst.so
+cp $tool_src/libInst.so $bin_dir
+#cp $tool_src/libInst.so $my_dir
+$tool_src/DSLtool -m static -o $bininstr $binfile
+if [ $? -eq 0 ]
+then
+    echo "Successfully created instrumented file"
+else
+    echo "Could not create instrumented file" >&2
+    exit
+fi
+LD_PRELOAD=$tool_src/libInst.so $bininstr $*
+#LD_PRELOAD=$bin_dir/libInst.so $bininstr $*
+
