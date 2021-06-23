@@ -22,7 +22,8 @@ enum{
     INIT_C,
     TEMP_C,
     STAT_H,
-    DYN_H
+    DYN_H,
+    ACT_C
 };
 typedef struct{
   int type;
@@ -62,7 +63,8 @@ class CodeGen : public Visitor {
     fstream outfile_t;
     fstream outfile_sh;
     fstream outfile_dh;
-    fstream *outfile[10];
+    fstream outfile_ac;
+    fstream *outfile[11];
     int curr;
    public:
         

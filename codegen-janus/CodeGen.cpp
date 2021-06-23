@@ -50,6 +50,7 @@ bool type_expr = false;
 bool exit_block = false;                //to specifiy if we are within an exit block
 bool init_block = false;                //to specify if we are within an init block
 bool pass_args= false;                  //to specify if we need to pass arguments from static part to dynamic part in Janus
+bool is_act=false;
 
 
 template<class Type1, class Type2>
@@ -84,6 +85,7 @@ CodeGen::CodeGen(std::string filename){
     outfile_gh.open(filename+".globalh", ios::out);     //Header with Global Definitions (Note: temp, translation in STATH and DYNH)
     outfile_sh.open(filename+".stath", ios::out);       //Global Var Definitions for Static Part
     outfile_dh.open(filename+".dynh", ios::out);        //Global Var Definitions for Dynamic Part
+    outfile_ac.open(filename+".cpp", ios::out);
     global_file = filename+".globalh" ;         
     outfile[STAT] = &outfile_s;
     outfile[DYN] = &outfile_d;
@@ -95,6 +97,7 @@ CodeGen::CodeGen(std::string filename){
     outfile[GLOBAL_H] = &outfile_gh;
     outfile[STAT_H] = &outfile_sh;
     outfile[DYN_H] = &outfile_dh;
+    outfile[ACT_C] = &outfile_ac;
     curr= STAT;
     get_func[STATIC]= get_static_func;                  //Utility functions for CFE attributes available in Static part
     get_func[DYNAMIC]= get_dyn_func;                    //Utility function for CFE attributes available in Dynamic part
@@ -694,6 +697,8 @@ void CodeGen::visit(TypeDeclStmtList* tstmtlist) {
     offset.push(count);
 }
 void CodeGen::visit(TypeDeclStmt* tstmt){
+    if(is_act)
+        *(outfile[curr]) << "extern ";
     tstmt->texpr->accept(*this);
     //*(outfile[curr])<<SEMICOLON;
 }
@@ -721,9 +726,11 @@ void CodeGen::visit(PrimitiveType* primtype) {
             break;
        case UINT32:
             type = "uint32_t";
+            stdLib.insert("stdint.h");
         break;
        case UINT64:
             type = "uint64_t";
+            stdLib.insert("stdint.h");
         break;
        case DOUBLE:
             type = "double";
@@ -997,23 +1004,22 @@ void CodeGen::visit(Action* action) {
     }
     func_sign += ")";
 
-    indent();*(outfile[curr])<<func_sign<<"{"<<endl;
-    indentLevel[curr]++;
+    indent();*(outfile[curr])<<func_sign<<"{"<<endl; *(outfile[ACT_C])<<func_sign<<"{"<<endl;
+    indentLevel[curr]++; indentLevel[ACT_C]++;
     
     //Copy contents from temp to func.c file
     outfile_t.open("temp.cpp", ios::in);
     string line;
     while(getline(outfile_t, line)){
-        *(outfile[curr])<<line<<endl;
+        *(outfile[curr])<<line<<endl; *(outfile[ACT_C])<<line<<endl;
     }
     outfile_t.close();
-    indentLevel[curr]--;
-    indent(); *(outfile[curr])<<"}"<<endl;
+    indentLevel[curr]--; indentLevel[ACT_C]--;
+    indent(); *(outfile[curr])<<"}"<<endl; *(outfile[ACT_C])<<"}"<<endl;
     
     //callback function declaration/prototype
     curr = FUNC_H;
     indent(); *(outfile[curr])<<func_sign<<";"<<endl;
-
     
      
     //insert clean call after all the statements within an actions have been travered and code generated*/
@@ -1103,9 +1109,20 @@ void CodeGen::visit(ProgramBlock* prog) {
         global= true;
         curr = GLOBAL_H;  //common file
         prog->globaldeclarations->accept(*this); 
+        
         outfile_gh.close();
+        for(auto &header: stdLib){
+            *(outfile[ACT_C])<<"#include <"<<header<<">"<<endl;
+            *(outfile[FUNC_H])<<"#include <"<<header<<">"<<endl;
+        }
+        curr = ACT_C;  //action cpp file
+        is_act = true;
+        prog->globaldeclarations->accept(*this); 
+        is_act = false;
         global= false;
+        curr = GLOBAL_H;
     }
+
     //Step 2: Start generating code for command blocks
     if(prog->commandblocks->nodes.size())
         prog->commandblocks->accept(*this);
@@ -1147,7 +1164,7 @@ void CodeGen::visit(ProgramBlock* prog) {
           outfile_gh.clear();
           outfile_gh.seekg(0);
           while(std::getline(outfile_gh, line)){
-              if(lineNo == count){
+              if(lineNo-1 == count){
                   *(outfile[STAT_H])<<line<<endl;
                   break;
               }
@@ -1159,8 +1176,12 @@ void CodeGen::visit(ProgramBlock* prog) {
           outfile_gh.clear();
           outfile_gh.seekg(0);
           while(std::getline(outfile_gh, line)){
-              if(lineNo == count){
+              if(lineNo-1 == count){
                   *(outfile[DYN_H])<<line<<endl;
+                  size_t pos = line.find("=");
+                  line.erase(pos);
+                  line+=";";
+                  *(outfile[FUNC_H])<< "extern " << line <<endl;
                   break;
               }
               count++;
@@ -1181,7 +1202,7 @@ void CodeGen::visit(ProgramBlock* prog) {
     }
 
     //Step 8: create dynamic handler table
-    curr=DYN;
+    curr = DYN;
     create_handler_table();
 }
 
@@ -1227,11 +1248,11 @@ void CodeGen::visit(Component* comp) {
                    nest_level[cmdlevel]++;
               }
               else if(upper_level == MODULE){
-                  indent(); *(outfile[curr])<<"for(auto &func : jc.functions){"<<endl;  //should use name of modeule?
-                  indentLevel[curr]++;
-                  indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<": func.blocks){"<<endl; 
-                  indentLevel[curr]++;
-                   nest_level[cmdlevel]+=2;
+                    indent(); *(outfile[curr])<<"for(auto &func : jc.functions){"<<endl;  //should use name of modeule?
+                    indentLevel[curr]++;
+                    indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<": func.blocks){"<<endl; 
+                    indentLevel[curr]++;
+                    nest_level[cmdlevel]+=2;
               }
               else{
                   cerr<<"ERROR: nesting not allowed or invalid"<<endl;
@@ -1239,17 +1260,17 @@ void CodeGen::visit(Component* comp) {
           break;
           case LOOP:
               if(upper_level == FUNC){
-                  indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<": "<<upper_name<<".loops){"<<endl; 
-               indentLevel[curr]++;
+                   indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<": "<<upper_name<<".loops){"<<endl; 
+                   indentLevel[curr]++;
                    nest_level[cmdlevel]++;
               }
               else if(upper_level == MODULE){
-                  indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<" : jc.loops){"<<endl;  //should use name of modeule?
+                   indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<" : jc.loops){"<<endl;  //should use name of modeule?
                    indentLevel[curr]++;
                    nest_level[cmdlevel]++;
               }
               else{
-                  cerr<<"ERROR: nesting not allowed or invalid"<<endl;
+                   cerr<<"ERROR: nesting not allowed or invalid"<<endl;
               }
           break;
           case FUNC:

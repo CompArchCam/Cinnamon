@@ -11,7 +11,7 @@ int ruleID=1;
 
 int mode=0;
 int error_count=0;
-int indentLevel[10]={0,0,0,0,0,0,0,0,0,0};   //separate indent level for each outfile; *_static, *_dynamic, func.cpp, func.h 
+int indentLevel[11]={0,0,0,0,0,0,0,0,0,0,0};   //separate indent level for each outfile; *_static, *_dynamic, func.cpp, func.h 
 map<string,string> get_func[2];
 
 #define DYNAMIC 1
