@@ -44,13 +44,13 @@ void yyerror(ProgramBlock*& program, const char *s) {printf("ERROR: %s\n", s);}
 %token <token> PLUS MINUS MULT DIV L_AND L_OR AND OR XOR NOT INIT_OP
 %token <token> CONJUN DISJUN L_BRACE R_BRACE L_PARAN R_PARAN L_SQR R_SQR COMMA SEMICOLON COLON DOT
 %token <token> OTHER
-%token <token> IF ELSE WHILE FORLOOP RETURN GLOBAL LOCAL DO DEF ISTYPE TYPEOF USAGE INIT
-%token <token> T_AT T_BEFORE T_AFTER T_ENTRY T_EXIT T_ITER WHERE_C
+%token <token> IF ELSE WHILE FORLOOP RETURN GLOBAL LOCAL DO DEF ISTYPE TYPEOF USAGE INIT SELECT
+%token <token> T_AT T_BEFORE T_AFTER T_WITH T_ENTRY T_EXIT T_ITER WHERE_C
 %token <token> B_TRUE B_FALSE NULL_PTR
 %token <token> SCOPE RULE
-%token <token> TUPLE DICT VECT SET PAIR INT VAR CHAR DOUBLE BOOL UINT32 UINT64 ADDR_INT FILE_IO FILE_LINE
+%token <token> TUPLE DICT VECT SET PAIR INT VAR CHAR DOUBLE BOOL UINT32 UINT64 ADDR_INT FILE_IO FILE_LINE INSTR
 %token <token> FUNC INST LOOP BASICBLOCK SSANODE MODULE
-%token <token> OP_CALL OP_MOV OP_ADD OP_SUB OP_MUL OP_DIV OP_NOP OP_RETURN OP_BRANCH OP_CMP OP_LOAD OP_STORE OP_GETPTR 
+%token <token> OP_CALL OP_MOV OP_ADD OP_SUB OP_MUL OP_DIV OP_NOP OP_RETURN OP_BRANCH OP_CMP OP_LOAD OP_STORE OP_GETPTR OP_INC OP_LABEL OP_JNL OP_JL
 %left PLUS MINUS
 %left MULT DIV
 
@@ -82,7 +82,7 @@ void yyerror(ProgramBlock*& program, const char *s) {printf("ERROR: %s\n", s);}
 %type <token> bool_const
 %type <token> opcode register reg_id_type reg_type
 
-%type <typedecl> type_decl_expr primitive_type_decl composite_type_decl file_type_decl
+%type <typedecl> type_decl_expr primitive_type_decl composite_type_decl file_type_decl instr_type_decl bb_type_decl
 %type <typespec> v_type
 %type <primtype> primitive_type
 %type <comptype> composite_type tuple array dict pair set vect
@@ -106,7 +106,7 @@ command_blocks:
 ;
 
 command_block:  
-   component_decl cond L_BRACE type_decl_stmts stmts actions command_blocks R_BRACE {$$ = new CommandBlock($1,$2 ,$4, $5, $6, $7);} | component_decl cond L_BRACE type_decl_stmts stmts command_blocks actions R_BRACE {$$ = new CommandBlock($1,$2 ,$4, $5, $7, $6);}
+   SELECT component_decl cond L_BRACE type_decl_stmts stmts actions command_blocks R_BRACE {$$ = new CommandBlock($2, $3 ,$5, $6, $7, $8);} | SELECT component_decl cond L_BRACE type_decl_stmts stmts command_blocks actions R_BRACE {$$ = new CommandBlock($2, $3 ,$5, $6, $8, $7);}
 ;
 cond: 
    {$$ = new ConstraintExpr();} | WHERE_C L_PARAN expr R_PARAN{$$ = new ConstraintExpr($3);}
@@ -119,16 +119,24 @@ type_decl_stmt:
         type_decl_expr SEMICOLON {$$= new TypeDeclStmt($1);}
 ;
 
-type_decl_expr: primitive_type_decl {$$=$1;} | composite_type_decl {$$=$1;} | file_type_decl {$$ = $1;}
+type_decl_expr: primitive_type_decl {$$=$1;} | composite_type_decl {$$=$1;} | file_type_decl {$$=$1;} | instr_type_decl {$$=$1;} | bb_type_decl {$$=$1;}
 ;
 
 primitive_type_decl: primitive_type ident {$$ = new PrimitiveTypeDecl($1, $2);} | primitive_type ident INIT_OP expr {$$= new PrimitiveTypeDecl($1, $2, $4);}
 ;
 
 file_type_decl: FILE_IO ident L_PARAN STR_CONST R_PARAN {$$ = new FileTypeDecl($2, new StrConst($4));} | FILE_IO ident {$$ = new FileTypeDecl($2);}
+;
+
+instr_type_decl: INST ident {$$ = new InstTypeDecl($2);}
+;
+
+bb_type_decl: BASICBLOCK ident {$$ = new BasicblockTypeDecl($2);}
+;
 
 primitive_type:
         INT {$$ = new PrimitiveType(INT);}| ADDR_INT {$$ = new PrimitiveType(ADDR_INT);} | UINT32 {$$ = new PrimitiveType(UINT32);} | UINT64 {$$ = new PrimitiveType(UINT64);} |DOUBLE {$$= new PrimitiveType(DOUBLE);} | BOOL {$$ = new PrimitiveType(BOOL);} | CHAR {$$= new PrimitiveType(CHAR);} | VAR {$$= new PrimitiveType(VAR);} | FILE_LINE{$$= new PrimitiveType(FILE_LINE);};
+
 composite_type_decl: 
         composite_type ident {$$ = new CompositeTypeDecl($1, $2);} | composite_type ident INIT_OP L_BRACE composite_init R_BRACE {$$= new CompositeTypeDecl($1, $2, $5);}
 ;
@@ -214,7 +222,7 @@ arithlogicExpr:
         logical_or_expr {$$= $1;}
 ;
 type_pred_expr:
-        L_PARAN expr R_PARAN ISTYPE reg_type {$$= new TypePredExpr($2, "reg");} | expr ISTYPE reg_type {$$=new TypePredExpr($1, "reg");} | L_PARAN expr R_PARAN ISTYPE MEM {$$= new TypePredExpr($2, "mem");} |  expr ISTYPE MEM {$$=new TypePredExpr($1, "mem");} |  L_PARAN expr R_PARAN ISTYPE CONST {$$= new TypePredExpr($2, "Const");} | expr ISTYPE CONST {$$= new TypePredExpr($1, "Const");} 
+        L_PARAN expr R_PARAN ISTYPE reg_type {$$= new TypePredExpr($2, "reg");} | expr ISTYPE reg_type {$$=new TypePredExpr($1, "reg");} | L_PARAN expr R_PARAN ISTYPE MEM {$$= new TypePredExpr($2, "mem");} |  expr ISTYPE MEM {$$=new TypePredExpr($1, "mem");} |  L_PARAN expr R_PARAN ISTYPE CONST {$$= new TypePredExpr($2, "const");} | expr ISTYPE CONST {$$= new TypePredExpr($1, "const");} 
 ;
 logical_or_expr: 
         logical_and_expr {$$= $1;} | logical_or_expr L_OR logical_and_expr {$$ = new BinaryCondExpr($1, $3,L_OR);}
@@ -255,8 +263,10 @@ factor:
 component_decl:
         c_type ident{$$=new Component($1, $2);}
 ;
+
 c_type: MODULE{$$=MODULE;} | INST{$$=INST;} | FUNC{$$=FUNC;} | LOOP{$$=LOOP;} | SSANODE{$$=SSANODE;} | BASICBLOCK{$$=BASICBLOCK;}
 ;
+
 ident:  
         IDENTIFIER{$$ = new Identifier($1);}
 ;
@@ -284,10 +294,10 @@ bool_const:
         B_TRUE{$$=B_TRUE;} | B_FALSE {$$= B_FALSE;}
 ;
 opcode:
-        OP_CALL{$$=OP_CALL;} | OP_MOV{$$=OP_MOV;} | OP_ADD{$$=OP_ADD;} | OP_SUB{$$=OP_SUB;} | OP_MUL{$$=OP_MUL;} | OP_DIV{$$=OP_DIV;} | OP_NOP{$$=OP_NOP;} | OP_LOAD{$$=OP_LOAD;} | OP_STORE{$$=OP_STORE;} | OP_RETURN{$$=OP_RETURN;} | OP_GETPTR{$$=OP_GETPTR;} | OP_CMP{$$=OP_CMP;} | OP_BRANCH{$$=OP_BRANCH;}
+        OP_CALL{$$=OP_CALL;} | OP_MOV{$$=OP_MOV;} | OP_ADD{$$=OP_ADD;} | OP_SUB{$$=OP_SUB;} | OP_MUL{$$=OP_MUL;} | OP_DIV{$$=OP_DIV;} | OP_NOP{$$=OP_NOP;} | OP_LOAD{$$=OP_LOAD;} | OP_STORE{$$=OP_STORE;} | OP_RETURN{$$=OP_RETURN;} | OP_GETPTR{$$=OP_GETPTR;} | OP_CMP{$$=OP_CMP;} | OP_BRANCH{$$=OP_BRANCH;} | OP_JNL{$$=OP_JNL;} | OP_JL{$$=OP_JL;} | OP_INC{$$=OP_INC;} | OP_LABEL{$$=OP_LABEL;}
 ;
 trigger:  
-        T_AT{$$=T_AT;} | T_BEFORE{$$= T_BEFORE;} | T_AFTER{$$= T_AFTER;} |T_ENTRY{$$=T_ENTRY;} | T_EXIT{$$=T_EXIT;} | T_ITER{$$=T_ITER;}
+        T_AT{$$=T_AT;} | T_BEFORE{$$= T_BEFORE;} | T_AFTER{$$= T_AFTER;} | T_ENTRY{$$=T_ENTRY;} | T_EXIT{$$=T_EXIT;} | T_ITER{$$=T_ITER;} | T_WITH{$$=T_WITH;}
 ;
 uop:     
         NOT{$$=NOT;} | MINUS{$$=MINUS;}

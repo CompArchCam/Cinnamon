@@ -37,7 +37,7 @@ comment     "//".*"\n"
 "else"                  { return ELSE; }
 "while"                 { return WHILE; }
 "where"                 {return WHERE_C;}
-"def"                  {return DEF;}
+"def"                   {return DEF;}
 "do"                    {return DO;}
 "reg"                   {return REG_64;}
 "reg_16"                {return REG_16;}
@@ -45,8 +45,9 @@ comment     "//".*"\n"
 "reg_id"                {return REG_64_ID;}
 "reg_16_id"             {return REG_16_ID;}
 "reg_32_id"             {return REG_32_ID;}
+"select"                {return SELECT;}
 "mem"                   {return MEM;}
-"Const"                 {return CONST;}
+"const"                 {return CONST;}
 "fp"                    {return REG_64_FP;}
 "sp"                    {return REG_64_SP;}
 "r0"                    {return REG_64_RAX;}
@@ -69,12 +70,13 @@ comment     "//".*"\n"
 "file"                  {return FILE_IO;}
 "line"                  {return FILE_LINE;}
 "int"                   {return INT;}
-"addr"                   {return ADDR_INT;}
+"addr"                  {return ADDR_INT;}
 "double"                {return DOUBLE;}
 "dict"                  {return DICT;}
 "vector"                {return VECT;}
 "set"                   {return SET;}
 "inst"                  {return INST;}
+"instr"                 {return INSTR;}
 "ssanode"               {return SSANODE;}
 "loop"                  {return LOOP;}
 "module"                {return MODULE;}
@@ -82,7 +84,8 @@ comment     "//".*"\n"
 "func"                  {return FUNC;}
 "at"                    {return T_AT;}
 "before"                {return T_BEFORE;}
-"after"                 { return T_AFTER;}
+"after"                 {return T_AFTER;}
+"with"                  {return T_WITH;}
 "entry"                 {return T_ENTRY;}
 "exit"                  {return T_EXIT;}
 "iter"                  {return T_ITER;}
@@ -91,6 +94,7 @@ comment     "//".*"\n"
 "Call"                  {return OP_CALL;}
 "Mov"                   {return OP_MOV;}
 "Add"                   {return OP_ADD;}
+"Inc"                   {return OP_INC;}
 "Sub"                   {return OP_SUB;}
 "Mul"                   {return OP_MUL;}
 "Div"                   {return OP_DIV;}
@@ -101,6 +105,9 @@ comment     "//".*"\n"
 "GetPtr"                {return OP_GETPTR;}
 "Cmp"                   {return OP_CMP;}
 "Branch"                {return OP_BRANCH;}
+"Jnl"                   {return OP_JNL;}
+"Jl"                    {return OP_JL;}
+"Label"                 {return OP_LABEL;}
 "+"                     { return PLUS; }
 "-"                     { return MINUS; }
 "*"                     { return MULT; }

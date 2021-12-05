@@ -9,7 +9,7 @@
 #include "CodeGen.h"
 #include "util.h"
 #define MAX_NEST 10
-#define FILE_T "file"
+#define FILE_T "fstream"
 
 
 string curr_key;
@@ -31,7 +31,9 @@ std::set<std::string> actionVars;               //set of variables defined withi
 std::deque<std::string> activeVars;             //overall set of active variables (includes global and currently active)
 std::map<string, string> activeVarsType;        //type of activeVars (currently tracing only primitive)
 std::map <string, int> globalDeclList;          //all global decl and their location in globalh file
-std::set<std::string> stdLib;                   //standard libraries to be included
+std::set<std::string> stdLib = {"iostream", "fstream"};                   //standard libraries to be included
+vector<string> dummy_var;
+set<string> glbl_dummy_var;
 
 int var_count = 0;                              //counter for variables being passed to instrumented actions
 int cmdlevel = -1;                              //cmdlevel = 0 is outermost command, cmdlevel>0, inner commands
@@ -45,11 +47,64 @@ int nest_level[MAX_NEST];               //for indentation and format purpose
 
 
 bool within_action=false;               //to determine if the current statement or access within an action
+bool within_at=false;                     //to determine if the current statement or access within an "at" block
 bool fcall = false;                     //to specify whether this is a function call expression
 bool type_expr = false;                 
 bool exit_block = false;                //to specifiy if we are within an exit block
 bool init_block = false;                //to specify if we are within an init block
 bool pass_args= false;                  //to specify if we need to pass arguments from static part to dynamic part in Janus
+bool is_act=false;
+bool no_var_func = false;
+
+//Variables to process maps/dicts
+int mapTypeIndex = -1;
+vector<pair<string, string>> mapFunctions;
+pair<string, string> mapType;
+map<string, pair<string, string>> maps;
+bool rhs_map_assn = false;
+
+//Variables to process sets
+map<string, string> sets;
+vector<string> setFunctions;
+string set_type;
+bool is_set = false;
+
+//Variables to process vectors
+map<string, string> vectors;
+vector<string> vectorFunctions;
+string vector_type;
+bool is_vector = false;
+
+//Variables to process files
+set<string> files;
+
+//Variables to process instructions
+set<string> instrs;
+set<string> basicblocks;
+bool in_inst_function = false;
+
+int in_function = 0;
+
+//Variables to process opcodes
+bool rhs_opcode = false;
+bool arith_opnd = false;
+
+int curr_ctype;
+string curr_cname;
+
+string print_func = 
+R"(void print_u64(uint64_t x){
+    printf("%ld\n",x);
+}
+void print_u32(uint32_t x){
+    printf("%d\n",x);
+}
+void print_i(int x){
+    printf("%d\n",x);
+}
+void print_str(char* x){
+    printf("%s\n",x);
+})";
 
 
 template<class Type1, class Type2>
@@ -84,6 +139,8 @@ CodeGen::CodeGen(std::string filename){
     outfile_gh.open(filename+".globalh", ios::out);     //Header with Global Definitions (Note: temp, translation in STATH and DYNH)
     outfile_sh.open(filename+".stath", ios::out);       //Global Var Definitions for Static Part
     outfile_dh.open(filename+".dynh", ios::out);        //Global Var Definitions for Dynamic Part
+    outfile_ac.open(filename+".cpp", ios::out);         //Code to be compiled into assembly
+    outfile_at.open(filename+".at", ios::out);         //Code to be compiled into assembly
     global_file = filename+".globalh" ;         
     outfile[STAT] = &outfile_s;
     outfile[DYN] = &outfile_d;
@@ -95,10 +152,13 @@ CodeGen::CodeGen(std::string filename){
     outfile[GLOBAL_H] = &outfile_gh;
     outfile[STAT_H] = &outfile_sh;
     outfile[DYN_H] = &outfile_dh;
+    outfile[ACT_C] = &outfile_ac;
+    outfile[AT_C] = &outfile_at;
     curr= STAT;
     get_func[STATIC]= get_static_func;                  //Utility functions for CFE attributes available in Static part
     get_func[DYNAMIC]= get_dyn_func;                    //Utility function for CFE attributes available in Dynamic part
 }
+
 CodeGen::~CodeGen(){
     outfile_s.close();
     outfile_d.close();
@@ -106,7 +166,6 @@ CodeGen::~CodeGen(){
     outfile_fh.close();
     outfile_e.close();
     outfile_i.close();
-
 }
 
 void CodeGen::indent(){
@@ -182,9 +241,9 @@ void CodeGen::visit(Identifier* id) {
             dyn_sym_map_arg[vid].type = activeVarsType[vid];
             *(outfile[curr])<<dyn_sym_map_arg[vid].var;
        }
-       else{ 
-          cerr<<"ERROR: variable "<<vid<< " not defined"<<endl;
-          error_count++;
+       else{
+            cerr<<"ERROR: variable "<<vid<< " not defined"<<endl;
+            error_count++;
        }
    }
    else{//access in static part
@@ -206,7 +265,7 @@ void CodeGen::visit(StrConst* sc) {
     *(outfile[curr])<< sc->value;
 }
 
-void CodeGen::visit(NumConst* nc) {    
+void CodeGen::visit(NumConst* nc) {
     *(outfile[curr])<<nc->value;
 }
 
@@ -230,7 +289,10 @@ void CodeGen::visit(BoolConst* bc) {
 }
 void CodeGen::visit(OpCode* op) {
     string str;
-    str = opcodes[op->value];
+    if(rhs_opcode)
+        str = instr_opcodes[op->value];
+    else
+        str = opcodes[op->value];
     str.erase(remove( str.begin(), str.end(), '\"' ),str.end());
     *(outfile[curr]) << str; 
 }
@@ -242,7 +304,37 @@ void CodeGen::visit(ConstraintExpr* condexpr) {
            condexpr->accept(*this);
 }
 void CodeGen::visit(RegIDExpr* regidexpr){
-       // TODO
+        int reg = regidexpr->reg;
+        int size = regidexpr->type;
+        string s;
+        string regstr;
+
+        switch(size){
+            case REG_64_ID:
+                s = "R";
+                break;
+            case REG_32_ID:
+                s = "E";
+                break;
+            case REG_16_ID:
+                s = "";
+                break;
+        }
+        switch(reg){
+            case REG_64_RAX:
+                regstr = "DR_REG_" + s + "AX";
+                break;
+            case REG_64_RBX:
+                regstr = "DR_REG_" + s + "BX";
+                break;
+            case REG_64_SP:
+                regstr = "DR_REG_" + s + "SP";
+                break;
+            case REG_64_FP:
+                regstr = "DR_REG_" + s + "BP";
+                break;
+        }
+        *(outfile[curr]) << "opnd_create_reg(" << regstr << ")"; 
 }
 void CodeGen::visit(RegValExpr* regvalexpr){
         //TODO
@@ -306,14 +398,54 @@ void CodeGen::visit(IndexLHS* ixlhs){
         }
         else{          //This is a user defined, so we need to check in local or global vars
             if(find(activeVars.begin(), activeVars.end(), base_name) != activeVars.end()){
-                *(outfile[curr])<<base_name<<"[";
-                ixlhs->index->accept(*this);
-                *(outfile[curr])<<"]";
-                if(is_global_var(base_name)){
-                    if(lhs_assn)
-                        global_uses[base_name].second.def = 1;
-                    else
-                        global_uses[base_name].second.ref = 1;
+
+                //Check if the variable is a map, if yes change to function call
+                bool is_map = false;
+                int function_index = -1;
+                for(pair<string, pair<string, string>> m: maps){
+                    if(m.first == base_name) {
+                        is_map = true;
+                        for(int i = 0; i < mapFunctions.size(); i++){
+                            string type1 = mapFunctions.at(i).first;
+                            string type2 = mapFunctions.at(i).second;
+                            if(type1 == m.second.first && type2 == m.second.second){
+                                function_index = i;
+                            }
+                        }
+                    }
+                }
+
+                if(is_map){
+                    if(lhs_assn){
+                        *(outfile[curr])<<"mapSet" + to_string(function_index) + "(&" << base_name<<",";
+                        ixlhs->index->accept(*this);
+                        *(outfile[curr])<<",";
+                        rhs_map_assn = true;
+                        if(within_action || init_block || exit_block){
+                            global_uses[base_name].second.def = 1;
+                        } else {
+                            global_uses[base_name].first.def = 1;
+                        }
+                    } else {
+                        *(outfile[curr])<<"mapGet" + to_string(function_index) + "(&" << base_name<<",";
+                        ixlhs->index->accept(*this);
+                        *(outfile[curr])<<")";
+                        if(within_action || init_block || exit_block){
+                            global_uses[base_name].second.ref = 1;
+                        } else {
+                            global_uses[base_name].first.ref = 1;
+                        }
+                    }
+                } else {
+                    *(outfile[curr])<<base_name<<"[";
+                    ixlhs->index->accept(*this);
+                    *(outfile[curr])<<"]";
+                    if(is_global_var(base_name)){
+                        if(lhs_assn)
+                            global_uses[base_name].second.def = 1;
+                        else
+                            global_uses[base_name].second.ref = 1;
+                    }
                 }
             }
         }
@@ -355,25 +487,48 @@ void CodeGen::visit(DerefLHS* dlhs) {
                       deref_level--;
                     }
                     if(within_action){
-                          if(!type_expr){
-                              if(acc_func_dyn_cat[field_name]){
-                                  string search_key = "vars["+ to_string(attr_count++)+"]";
-                                  dyn_sym_map[search_key].var = curr_key;
-                                  dyn_sym_map[search_key].type = "uint64_t";   //TODO: change
-                                  dyn_sym_map[search_key].cat = 1;
-                                  *(outfile[curr])<<search_key;
-                              }else{
-                                  pass_args = true;
-                                  string search_key = "var"+ to_string(var_count++);
-                                  dyn_sym_map[search_key].var = curr_key;
-                                  dyn_sym_map[search_key].type = "uint64_t"; //TODO: change
-                                  dyn_sym_map[search_key].cat = 0;
-                                  *(outfile[curr])<<search_key;
-                              }
-                          }
-                          else{
-                              type_key = curr_key;
-                          }
+                        if(!type_expr){
+                            if(get_dyn_func.find(field_name) != get_dyn_func.end()){
+                                if(!within_at){
+                                    *(outfile[curr])<< base_name + "_" + field_name;
+                                    string varname = base_name + "_" + field_name;
+                                    if(find(glbl_dummy_var.begin(), glbl_dummy_var.end(), varname) == glbl_dummy_var.end()){
+                                        dummy_var.push_back(varname);
+                                        glbl_dummy_var.insert(varname);
+                                    }
+                                } else {
+                                    if (field_name == "print") {
+                                        if(curr_ctype == INST)
+                                            field_name = "print_inst";
+                                        if(curr_ctype == BASICBLOCK)
+                                            field_name = "print_bb";
+                                        if(curr_ctype == INST || curr_ctype == BASICBLOCK)
+                                            base_name = "trigger";
+                                        string func_name = get_dyn_func[field_name];
+                                        *(outfile[curr])<< func_name + base_name;
+                                        in_function++;
+                                        no_var_func = true;
+                                    } else {
+                                        if(curr_ctype == INST || curr_ctype == BASICBLOCK)
+                                            base_name = "trigger";
+                                        string func_name = get_dyn_func[field_name];
+                                        if(field_name == "replace" || field_name == "insert_before" || field_name == "insert_after" || field_name == "append" || field_name == "prepend" || field_name == "replace_bb" || field_name == "replace_bb_but_last"){
+                                            *(outfile[curr])<< func_name + base_name + ", ";
+                                            in_function++;
+                                        } else if (field_name == "delete" || field_name == "clear" || field_name == "clear_but_last") {
+                                            *(outfile[curr])<< func_name + base_name;
+                                            in_function++;
+                                            no_var_func = true;
+                                        } else {
+                                            *(outfile[curr])<< func_name + base_name + CLOSEPARAN;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        else{
+                            type_key = curr_key;
+                        }
                     }
                     else{ /*could be called from static part*/
                         *(outfile[curr])<<curr_key; //need to check if static or dyn
@@ -390,7 +545,43 @@ void CodeGen::visit(DerefLHS* dlhs) {
             std::string base_name= ((IdentLHS*)dlhs->base)->name->name;
             std::string field_name = dlhs->field->name;
             if(is_active_var(base_name)){
-                *(outfile[curr])<<base_name<<"."<<field_name;
+                if(sets.find(base_name) != sets.end()){
+                    string set_type = sets[base_name];
+                    int i = 0;
+                    for(i = 0; i < setFunctions.size(); i++)
+                        if(setFunctions.at(i) == set_type)
+                            break;
+                    string funcname = get_set_func[field_name];
+                    *(outfile[curr])<< funcname + to_string(i) + "(&" + base_name + ", ";
+                    if(field_name == "size"){
+                        no_var_func = true;
+                    }
+                    in_function++;
+                } else if (vectors.find(base_name) != vectors.end()){
+                    string vector_type = vectors[base_name];
+                    int i = 0;
+                    for(i = 0; i < vectorFunctions.size(); i++)
+                        if(vectorFunctions.at(i) == vector_type)
+                            break;
+                    string funcname = get_vector_func[field_name];
+                    *(outfile[curr])<< funcname + to_string(i) + "(&" + base_name + ", ";
+                    in_function++;
+                } else if (files.find(base_name) != files.end()){
+                    string funcname = get_set_func[field_name];
+                    *(outfile[curr])<< funcname + "(&" + base_name + ", ";
+                    if(field_name == "close"){
+                         no_var_func = true;
+                    }
+                    in_function++;
+                } else if (basicblocks.find(base_name) != basicblocks.end()){
+                    string funcname = get_bb_func[field_name];
+                    *(outfile[curr])<< funcname + base_name + ", ";
+                    in_function++;
+                } else {
+                    if(instrs.find(base_name) != instrs.end())
+                        rhs_opcode = true;
+                    *(outfile[curr]) << base_name  << "." << field_name;
+                }
                 if(is_global_var(base_name)){
                     if(within_action || init_block || exit_block){
                         if(activeVarsType[base_name]== FILE_T){
@@ -438,8 +629,11 @@ void CodeGen::visit(DerefLHS* dlhs) {
             }
         }
         deref_level++;
-        if( isInstanceOf<LHS, DerefLHS>(dlhs->base))
+        if( isInstanceOf<LHS, DerefLHS>(dlhs->base)){
+            *(outfile[curr]) << curr_key;
              ((DerefLHS*)dlhs->base)->accept(*this);
+             *(outfile[curr]) << CLOSEPARAN;
+        }
         else if(isInstanceOf<LHS, IndexLHS>(dlhs->base))
             ((IndexLHS*)dlhs->base)->accept(*this);
        
@@ -450,17 +644,32 @@ void CodeGen::visit(FunctionCall* fc) {
     fcall = true;
     fc->name->accept(*this);
     fcall = false;
-    *(outfile[curr])<<OPENPARAN;               
+    if(!no_var_func)
+        *(outfile[curr])<<OPENPARAN;               
     fc->arguments->accept(*this);
-    *(outfile[curr])<<CLOSEPARAN;
+    if(in_function > 0){
+        *(outfile[curr])<<CLOSEPARAN;
+        in_function--;
+    }
+    if(!no_var_func)
+        *(outfile[curr])<<CLOSEPARAN;
+    else
+        no_var_func = false;
 }
 
 void CodeGen::visit(AssnExpression* aexpr) {
      lhs_assn = true;
      aexpr->lhs->accept(*this);
      lhs_assn= false;
-     *(outfile[curr])<<" = ";
-     aexpr->rhs->accept(*this);
+     if(rhs_map_assn){
+         aexpr->rhs->accept(*this);
+         *(outfile[curr])<<")";
+         rhs_map_assn = false;
+     } else {
+        *(outfile[curr])<<" = ";
+        aexpr->rhs->accept(*this);
+        rhs_opcode = false;
+     }   
 }
 
 void CodeGen::visit(UnaryExpression* uexpr) {
@@ -693,7 +902,10 @@ void CodeGen::visit(TypeDeclStmtList* tstmtlist) {
     }
     offset.push(count);
 }
+
 void CodeGen::visit(TypeDeclStmt* tstmt){
+    if(is_act)
+        *(outfile[curr]) << "extern ";
     tstmt->texpr->accept(*this);
     //*(outfile[curr])<<SEMICOLON;
 }
@@ -721,9 +933,11 @@ void CodeGen::visit(PrimitiveType* primtype) {
             break;
        case UINT32:
             type = "uint32_t";
+            stdLib.insert("stdint.h");
         break;
        case UINT64:
             type = "uint64_t";
+            stdLib.insert("stdint.h");
         break;
        case DOUBLE:
             type = "double";
@@ -733,6 +947,7 @@ void CodeGen::visit(PrimitiveType* primtype) {
             break;
        case ADDR_INT:
             type = "uintptr_t"; //or app_pc in janus
+            stdLib.insert("stdint.h");
             break;
        case FILE_LINE:
             type = "std::string";
@@ -742,6 +957,19 @@ void CodeGen::visit(PrimitiveType* primtype) {
             cerr<<"ERROR: variable type not known! ";
             error_count++;
             break;
+    }
+    if(mapTypeIndex!=-1){
+        if(mapTypeIndex == 0){
+            mapType.first = type;
+        } else {
+            mapType.second = type;
+        }
+    }
+    if(is_set){
+        set_type = type;
+    }
+    if(is_vector){
+        vector_type = type;
     }
     curr_type= type;
     *(outfile[curr])<<type;
@@ -756,14 +984,18 @@ void CodeGen::visit(PairType* pair) {
     pair->type1->accept(*this);
     *(outfile[curr])<<",";
     pair->type1->accept(*this);
+    *(outfile[curr])<<">";
 }
 
 void CodeGen::visit(DictType* dict) {
    stdLib.insert("map");
    *(outfile[curr])<<"map<";
+   mapTypeIndex++;
    dict->keytype->accept(*this);
    *(outfile[curr])<<",";
+   mapTypeIndex++;
    dict->valuetype->accept(*this);
+   mapTypeIndex=-1;
    *(outfile[curr])<<">";
 }
 
@@ -777,13 +1009,17 @@ void CodeGen::visit(TupleType* tuple) {
 void CodeGen::visit(VectType* vect) {
    stdLib.insert("vector");
    *(outfile[curr])<<"vector<";
+   is_vector = true;
    vect->etype->accept(*this);
+   is_vector = false;
    *(outfile[curr])<<">";
 }
 void CodeGen::visit(SetType* set_) {
    stdLib.insert("set");
    *(outfile[curr])<<"set<";
+   is_set = true;
    set_->etype->accept(*this);
+   is_set = false;
    *(outfile[curr])<<">";
 }
 void CodeGen::visit(FileTypeDecl* ftypedecl) {
@@ -793,18 +1029,52 @@ void CodeGen::visit(FileTypeDecl* ftypedecl) {
    stdLib.insert("iostream"); 
    stdLib.insert("fstream"); 
    *(outfile[curr])<<"fstream "<<identifier;
-   
+   files.insert(identifier);
+
    if(ftypedecl->f_var) *(outfile[curr])<<"("<<ftypedecl->f_var->name<<")";
    else if(ftypedecl->f_name) *(outfile[curr])<<"("<<ftypedecl->f_name->value<<")";
    *(outfile[curr]) <<";"<<endl;
    
    if(global){
-       //add extern def to func.h
        globalVars.insert(identifier);
        globalDeclList[identifier] = declLineNo++;
    }
    activeVars.push_back(identifier);
    activeVarsType[identifier] = FILE_T;
+   if(within_action){
+      actionVars.insert(identifier);
+   }
+}
+
+void CodeGen::visit(InstTypeDecl* itypedecl) {
+   std::string identifier = itypedecl->ident->name;
+   indent();
+   *(outfile[curr])<<"struct instr "<<identifier<<";"<<endl;
+   instrs.insert(identifier);
+
+   if(global){
+       globalVars.insert(identifier);
+       globalDeclList[identifier] = declLineNo++;
+   }
+   activeVars.push_back(identifier);
+   activeVarsType[identifier] = "struct instr";
+   if(within_action){
+      actionVars.insert(identifier);
+   }
+}
+
+void CodeGen::visit(BasicblockTypeDecl* bbtypedecl) {
+   std::string identifier = bbtypedecl->ident->name;
+   indent();
+   *(outfile[curr])<<"struct basicblock "<<identifier<<";"<<endl;
+   basicblocks.insert(identifier);
+
+   if(global){
+       globalVars.insert(identifier);
+       globalDeclList[identifier] = declLineNo++;
+   }
+   activeVars.push_back(identifier);
+   activeVarsType[identifier] = "struct basicblock";
    if(within_action){
       actionVars.insert(identifier);
    }
@@ -842,27 +1112,37 @@ void CodeGen::visit(PrimitiveTypeDecl* ptypedecl) {
 /*----- Composite Type Declarations (set, map, vector, array, pair, tuple etc) ------*/
 void CodeGen::visit(CompositeTypeDecl* ctypedecl) {
    std::string typedecl, type, identifier, initlist;
+   //if global variable, extern type identifier in func.h and then init in func.cpp
    
    identifier= ctypedecl->name->name;
    
    indent(); 
-   if(isInstanceOf<CompositeType, ArrayType>(ctypedecl->type)){
-      ((ArrayType*) ctypedecl->type)->accept(*this);
-      *(outfile[curr])<< " "<<identifier;
-      *(outfile[curr]) <<"["<<((ArrayType*) ctypedecl->type)->size<<"]";
-      if(global){
-          globalDeclList[identifier] = declLineNo++;
-          globalVars.insert(identifier);
-      }
-   }
-   else{
-      ctypedecl->type->accept(*this);
-      *(outfile[curr])<< " "<<identifier;
-      if(global){
-          globalDeclList[identifier] = declLineNo++;
-          globalVars.insert(identifier);
-      }
-   }
+    if(isInstanceOf<CompositeType, ArrayType>(ctypedecl->type)){
+        ((ArrayType*) ctypedecl->type)->accept(*this);
+        *(outfile[curr])<< " "<<identifier;
+        *(outfile[curr]) <<"["<<((ArrayType*) ctypedecl->type)->size<<"]";
+        if(global){
+            globalDeclList[identifier] = declLineNo++;
+            globalVars.insert(identifier);
+        }
+    }
+    else{
+        ctypedecl->type->accept(*this);
+        if(isInstanceOf<CompositeType, DictType>(ctypedecl->type)){
+            maps[identifier] = make_pair(mapType.first, mapType.second);
+        }
+        if(isInstanceOf<CompositeType, SetType>(ctypedecl->type)){
+            sets[identifier] = set_type;
+        }
+        if(isInstanceOf<CompositeType, VectType>(ctypedecl->type)){
+            vectors[identifier] = vector_type;
+        }
+        *(outfile[curr])<< " "<<identifier;
+        if(global){
+            globalDeclList[identifier] = declLineNo++;
+            globalVars.insert(identifier);
+        }
+    }
    activeVars.push_back(identifier);
    //activeVarsType[identifier] = curr_type;
    if(ctypedecl->init_list->expressions.size() != 0){
@@ -941,13 +1221,15 @@ void CodeGen::visit(Action* action) {
     
     int ctype =  comp_map[cmdlevel].first;              //type of the associate CFE/component of the current command level
     
+    curr_ctype = ctype;
+    curr_cname = cname;
+    
     
     //action can only be applied to the most recent or inner most level of CFE
     if(!activeCompVars.count(action->name->name) || cname.compare(action->name->name)){ //cannot do action on outer levels 
        cerr<<"FATAL ERROR: action cannot be performed on the given undefined component "<<action->name<<endl;
        error_count++;
        exit(1);
-
     }
 
 
@@ -958,6 +1240,8 @@ void CodeGen::visit(Action* action) {
     indentLevel[curr]++;
     mode= DYNAMIC;
     within_action = true;
+    if(action->trigger == T_AT || action->trigger == T_WITH)
+        within_at = true;
 
     //generate code for variable declared witin an action 
     if(action->dyn_decls->t_stmts.size() != 0){
@@ -968,6 +1252,7 @@ void CodeGen::visit(Action* action) {
     //within_action = true;
     action->stmts->accept(*this);
     within_action = false;
+    within_at = false;
     indentLevel[curr]--;
      
     outfile_t.close();
@@ -997,23 +1282,48 @@ void CodeGen::visit(Action* action) {
     }
     func_sign += ")";
 
-    indent();*(outfile[curr])<<func_sign<<"{"<<endl;
-    indentLevel[curr]++;
-    
-    //Copy contents from temp to func.c file
-    outfile_t.open("temp.cpp", ios::in);
-    string line;
-    while(getline(outfile_t, line)){
-        *(outfile[curr])<<line<<endl;
+    string buffer = "";
+
+    if(action->trigger != T_AT && action->trigger != T_WITH){
+        indent();*(outfile[curr])<<func_sign<<"{"<<endl; buffer += func_sign + "    {\n";
+        indentLevel[curr]++;
+        
+        //Copy contents from temp to func.c file
+        
+        outfile_t.open("temp.cpp", ios::in);
+        string line;
+        while(getline(outfile_t, line)){
+            *(outfile[curr])<<line<<endl; buffer += line + "\n";
+        }
+        outfile_t.close();
+        indentLevel[curr]--; indentLevel[ACT_C]--;
+        indent(); *(outfile[curr])<<"}"<<endl; buffer += "  }\n";
+    } else {
+        buffer += func_sign + "    {\n";
+        outfile_t.open("temp.cpp", ios::in);
+        string line;
+        while(getline(outfile_t, line)){
+            buffer += line + "\n";
+        }
+        outfile_t.close();
+        buffer += "  }\n";
     }
-    outfile_t.close();
-    indentLevel[curr]--;
-    indent(); *(outfile[curr])<<"}"<<endl;
+
+    for(string varname:dummy_var){
+        *(outfile[ACT_C])<<"int "<<varname<<" = 0;"<<endl;
+        *(outfile[GLOBAL_H])<<"int "<<varname<<" = 0;"<<endl;
+        *(outfile[FUNC_H])<<"extern int "<<varname<<";"<<endl;
+    }
+    dummy_var.clear();
+    if(action->trigger != T_AT && action->trigger != T_WITH)
+        *(outfile[ACT_C]) << buffer;
+    else {
+        *(outfile[AT_C]) << buffer;
+    }
     
     //callback function declaration/prototype
     curr = FUNC_H;
     indent(); *(outfile[curr])<<func_sign<<";"<<endl;
-
     
      
     //insert clean call after all the statements within an actions have been travered and code generated*/
@@ -1065,16 +1375,23 @@ void CodeGen::visit(Action* action) {
         *(outfile[curr])<<"){"<<endl;
         indentLevel[curr]++;
     }
+
+    string bitmask;
+    indent();
+    if(ctype == INST)
+        bitmask = "bitmask = func.liveRegIn[" + cname + ".id].bits;";
+    if(ctype == BASICBLOCK)
+        bitmask = "bitmask = func.liveRegIn[" + cname + ".bid].bits;";
+    *(outfile[curr]) << bitmask << endl;
     //insert janus rules for the action. rule generation data includes rule ID, name of CFE, instrumentation location and args to be passed
     if(pass_args && dyn_sym_map_arg.size()){ //check if any data needs to be passed from static part to instrumented callback functions
-
-        indent(); *(outfile[curr])<<"insertCustomRule<"<<to_str[ctype]<<">("<<ruleID<<","<<action->name->name<<","<<trigger<<", true";
+        indent(); *(outfile[curr])<<"insertCustomRule<"<<to_str[ctype]<<">("<<ruleID<<","<<cname<<","<<trigger<<", true";
         for(auto &it: dyn_sym_map_arg){
             *(outfile[curr])<<","<<it.first;
         }
-        *(outfile[curr])<<");"<<endl;
+        *(outfile[curr])<<", bitmask);"<<endl;
     }else{
-        indent(); *(outfile[curr])<<"insertCustomRule<"<<to_str[ctype]<<">("<<ruleID<<","<<action->name->name<<","<<trigger<<", false, 0);"<<endl;
+        indent(); *(outfile[curr])<<"insertCustomRule<"<<to_str[ctype]<<">("<<ruleID<<","<<cname<<","<<trigger<<", true, 0, bitmask);"<<endl;
     }
 
 
@@ -1097,15 +1414,34 @@ void CodeGen::visit(Action* action) {
  
 /*--- This is the Entry point / Start of Cinnamon Program ---*/
 void CodeGen::visit(ProgramBlock* prog) {
-
     //Step 1: Check any global declarations
-    if(prog->globaldeclarations->t_stmts.size() != 0){
-        global= true;
-        curr = GLOBAL_H;  //common file
-        prog->globaldeclarations->accept(*this); 
-        outfile_gh.close();
-        global= false;
+    // if(prog->globaldeclarations->t_stmts.size() != 0){
+    global= true;
+    curr = GLOBAL_H;  //common file
+    prog->globaldeclarations->accept(*this); 
+    
+    outfile_gh.close();
+    *(outfile[ACT_C])<<"#include <stdio.h>"<<endl;
+    for(auto &header: stdLib){
+        *(outfile[ACT_C])<<"#include <"<<header<<">"<<endl;
+        *(outfile[FUNC_H])<<"#include <"<<header<<">"<<endl;
     }
+    curr = ACT_C;  //action cpp file
+    *(outfile[curr])<<"using namespace std;"<<endl;
+    
+    *(outfile[curr])<< print_func << endl;
+    
+    global= false;
+    is_act = true;
+    prog->globaldeclarations->accept(*this); 
+    is_act = false;
+    curr = GLOBAL_H;
+    // }
+    
+    generateMapFunctions();
+    generateSetFunctions();
+    generateVectorFunctions();
+
     //Step 2: Start generating code for command blocks
     if(prog->commandblocks->nodes.size())
         prog->commandblocks->accept(*this);
@@ -1128,6 +1464,7 @@ void CodeGen::visit(ProgramBlock* prog) {
         init_block = false;
         indentLevel[curr]--;
     }
+
     //Step 5: All global declrations were combined in .globalh file. split them in .stath and .dynh file based on where they are accessed
     outfile_gh.open(global_file, ios::in);
     for(auto &header: stdLib){
@@ -1161,6 +1498,12 @@ void CodeGen::visit(ProgramBlock* prog) {
           while(std::getline(outfile_gh, line)){
               if(lineNo == count){
                   *(outfile[DYN_H])<<line<<endl;
+                  size_t pos = line.find("=");
+                  if(pos != -1) {
+                    line.erase(pos);
+                    line+=";";
+                  }
+                  *(outfile[FUNC_H])<< "extern " << line <<endl;
                   break;
               }
               count++;
@@ -1181,7 +1524,7 @@ void CodeGen::visit(ProgramBlock* prog) {
     }
 
     //Step 8: create dynamic handler table
-    curr=DYN;
+    curr = DYN;
     create_handler_table();
 }
 
@@ -1199,7 +1542,7 @@ void CodeGen::visit(Component* comp) {
               }
               else if(upper_level == BASICBLOCK){
                   indent(); *(outfile[curr])<<"Instruction *End = "<<upper_name<<".instrs+ "<<upper_name<<".size;"<<endl;
-                  indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<"="<<upper_name<<".instrs; "<<comp_name<<" < End;"<<comp_name<<"++"<<"){"<<endl; 
+                  indent(); *(outfile[curr])<<"for(auto *"<<comp_name<<"="<<upper_name<<".instrs; "<<comp_name<<" < End;"<<comp_name<<"++"<<"){"<<endl; 
                   indentLevel[curr]++;
                    nest_level[cmdlevel]++;
               }
@@ -1210,6 +1553,7 @@ void CodeGen::visit(Component* comp) {
               else if(upper_level == MODULE){
                   indent(); *(outfile[curr])<<"for(auto &func : jc.functions){"<<endl;  //should use name of modeule?
                   indentLevel[curr]++;
+                  indent(); *(outfile[curr])<<"livenessAnalysis(&func);"<<endl; 
                   indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<": func.instrs){"<<endl; 
                   indentLevel[curr]++;
                    nest_level[cmdlevel]+=2;
@@ -1227,11 +1571,12 @@ void CodeGen::visit(Component* comp) {
                    nest_level[cmdlevel]++;
               }
               else if(upper_level == MODULE){
-                  indent(); *(outfile[curr])<<"for(auto &func : jc.functions){"<<endl;  //should use name of modeule?
-                  indentLevel[curr]++;
-                  indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<": func.blocks){"<<endl; 
-                  indentLevel[curr]++;
-                   nest_level[cmdlevel]+=2;
+                    indent(); *(outfile[curr])<<"for(auto &func : jc.functions){"<<endl;  //should use name of modeule?
+                    indentLevel[curr]++;
+                    indent(); *(outfile[curr])<<"livenessAnalysis(&func);"<<endl; 
+                    indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<": func.blocks){"<<endl; 
+                    indentLevel[curr]++;
+                    nest_level[cmdlevel]+=2;
               }
               else{
                   cerr<<"ERROR: nesting not allowed or invalid"<<endl;
@@ -1239,22 +1584,23 @@ void CodeGen::visit(Component* comp) {
           break;
           case LOOP:
               if(upper_level == FUNC){
-                  indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<": "<<upper_name<<".loops){"<<endl; 
-               indentLevel[curr]++;
+                   indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<": "<<upper_name<<".loops){"<<endl; 
+                   indentLevel[curr]++;
                    nest_level[cmdlevel]++;
               }
               else if(upper_level == MODULE){
-                  indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<" : jc.loops){"<<endl;  //should use name of modeule?
+                   indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<" : jc.loops){"<<endl;  //should use name of modeule?
                    indentLevel[curr]++;
                    nest_level[cmdlevel]++;
               }
               else{
-                  cerr<<"ERROR: nesting not allowed or invalid"<<endl;
+                   cerr<<"ERROR: nesting not allowed or invalid"<<endl;
               }
           break;
           case FUNC:
               if(upper_level == MODULE){
                   indent(); *(outfile[curr])<<"for(auto &"<<comp_name<<" : jc.functions){"<<endl;  //should use name of modeule?
+                  indent(); *(outfile[curr])<<"livenessAnalysis(&func);"<<endl; 
                   indentLevel[curr]++;
                   nest_level[cmdlevel]++;
               }
@@ -1282,6 +1628,7 @@ void CodeGen::visit(Component* comp) {
            case INST:
                indent(); *(outfile[curr])<<"for (auto &func: jc.functions){"<<endl;
                indentLevel[curr]++;
+               indent(); *(outfile[curr])<<"livenessAnalysis(&func);"<<endl; 
                indent(); *(outfile[curr])<<"for (auto &"<<comp_map[cmdlevel].second << ": func.instrs){"<<endl;
                indentLevel[curr]++;
                nest_level[cmdlevel]+=2;
@@ -1289,6 +1636,7 @@ void CodeGen::visit(Component* comp) {
            case BASICBLOCK:
                indent(); *(outfile[curr])<<"for (auto &func: jc.functions){"<<endl;
                indentLevel[curr]++;
+               indent(); *(outfile[curr])<<"livenessAnalysis(&func);"<<endl; 
                indent(); *(outfile[curr])<<"for (auto &"<<comp_map[cmdlevel].second << ": func.blocks){"<<endl;
                indentLevel[curr]++;
                nest_level[cmdlevel]+=2;
@@ -1299,4 +1647,105 @@ void CodeGen::visit(Component* comp) {
            break;
        }
    }
+}
+
+void CodeGen::generateMapFunctions(){
+    for(pair<string, pair<string, string>> x: maps){
+        string type1 = x.second.first;
+        string type2 = x.second.second;
+
+        bool already_in = false;
+        for(pair<string, string> p: mapFunctions){
+            if(p.first == type1 && p.second == type2){
+                already_in = true;
+                break;
+            }
+        }
+        if(!already_in){
+            mapFunctions.push_back(make_pair(type1, type2));
+            *(outfile[FUNC_H]) << "void mapSet" + to_string(mapFunctions.size()-1) + "(map<" + type1 + "," + type2 +"> *m, " + type1 + " k, " + type2 + " v);" << endl;
+            *(outfile[FUNC_C]) << "void mapSet" + to_string(mapFunctions.size()-1) + "(map<" + type1 + "," + type2 +"> *m, " + type1 + " k, " + type2 + " v){" << endl;
+            *(outfile[FUNC_C]) << "    (*m)[k]=v;" << endl;
+            *(outfile[FUNC_C]) << "}" << endl;
+            *(outfile[ACT_C]) << "void mapSet" + to_string(mapFunctions.size()-1) + "(map<" + type1 + "," + type2 +"> *m, " + type1 + " k, " + type2 + " v){" << endl;
+            *(outfile[ACT_C]) << "    (*m)[k]=v;" << endl;
+            *(outfile[ACT_C]) << "}" << endl;
+            *(outfile[FUNC_H]) << type2 + " mapGet" + to_string(mapFunctions.size()-1) + "(map<" + type1 + "," + type2 +"> *m, " + type1 + " k);" << endl;
+            *(outfile[FUNC_C]) << type2 + " mapGet" + to_string(mapFunctions.size()-1) + "(map<" + type1 + "," + type2 +"> *m, " + type1 + " k){"  << endl;
+            *(outfile[FUNC_C]) << "    return (*m)[k];" << endl;
+            *(outfile[FUNC_C]) << "}" << endl;
+            *(outfile[ACT_C]) << type2 + " mapGet" + to_string(mapFunctions.size()-1) + "(map<" + type1 + "," + type2 +"> *m, " + type1 + " k){"  << endl;
+            *(outfile[ACT_C]) << "    return (*m)[k];" << endl;
+            *(outfile[ACT_C]) << "}" << endl;
+        }
+    }
+}
+
+void CodeGen::generateSetFunctions(){
+    for(pair<string, string> x: sets){
+        string type = x.second;
+
+        bool already_in = false;
+        for(string s: setFunctions){
+            if(s == type){
+                already_in = true;
+                break;
+            }
+        }
+        if(!already_in){
+            setFunctions.push_back(type);
+            *(outfile[FUNC_H]) << "int setCount" + to_string(setFunctions.size()-1) + "(set<" + type + "> *s, " + type + " k);" << endl;
+            *(outfile[FUNC_C]) << "int setCount" + to_string(setFunctions.size()-1) + "(set<" + type + "> *s, " + type + " k){" << endl;
+            *(outfile[FUNC_C]) << "    return (*s).count(k);" << endl;
+            *(outfile[FUNC_C]) << "}" << endl;
+            *(outfile[ACT_C]) << "int setCount" + to_string(setFunctions.size()-1) + "(set<" + type + "> *s, " + type + " k){" << endl;
+            *(outfile[ACT_C]) << "    return (*s).count(k);" << endl;
+            *(outfile[ACT_C]) << "}" << endl;
+            *(outfile[FUNC_H]) << "void setInsert" + to_string(setFunctions.size()-1) + "(set<" + type + "> *s, " + type + " k);" << endl;
+            *(outfile[FUNC_C]) << "void setInsert" + to_string(setFunctions.size()-1) + "(set<" + type + "> *s, " + type + " k){" << endl;
+            *(outfile[FUNC_C]) << "    (*s).insert(k);" << endl;
+            *(outfile[FUNC_C]) << "}" << endl;
+            *(outfile[ACT_C]) << "void setInsert" + to_string(setFunctions.size()-1) + "(set<" + type + "> *s, " + type + " k){" << endl;
+            *(outfile[ACT_C]) << "    (*s).insert(k);" << endl;
+            *(outfile[ACT_C]) << "}" << endl;
+            *(outfile[FUNC_H]) << "int setSize" + to_string(setFunctions.size()-1) + "(set<" + type + "> *s);" << endl;
+            *(outfile[FUNC_C]) << "int setSize" + to_string(setFunctions.size()-1) + "(set<" + type + "> *s){" << endl;
+            *(outfile[FUNC_C]) << "    return (*s).size();" << endl;
+            *(outfile[FUNC_C]) << "}" << endl;
+            *(outfile[ACT_C]) << "int setSize" + to_string(setFunctions.size()-1) + "(set<" + type + "> *s){" << endl;
+            *(outfile[ACT_C]) << "    return (*s).size();" << endl;
+            *(outfile[ACT_C]) << "}" << endl;
+        }
+    }
+}
+
+void CodeGen::generateVectorFunctions(){
+    for(pair<string, string> x: vectors){
+        string type = x.second;
+
+        bool already_in = false;
+        for(string s: vectorFunctions){
+            if(s == type){
+                already_in = true;
+                break;
+            }
+        }
+        if(!already_in){
+            vectorFunctions.push_back(type);
+            *(outfile[FUNC_H]) << "void vectorPushback" + to_string(vectorFunctions.size()-1) + "(vector<" + type + "> *s, " + type + " v);" << endl;
+            *(outfile[FUNC_C]) << "void vectorPushback" + to_string(vectorFunctions.size()-1) + "(vector<" + type + "> *s, " + type + " v){" << endl;
+            *(outfile[FUNC_C]) << "    (*s).push_back(v);" << endl;
+            *(outfile[FUNC_C]) << "}" << endl;
+            *(outfile[ACT_C]) << "void vectorPushback" + to_string(vectorFunctions.size()-1) + "(vector<" + type + "> *s, " + type + " v){" << endl;
+            *(outfile[ACT_C]) << "    (*s).push_back(v);" << endl;
+            *(outfile[ACT_C]) << "}" << endl;
+            *(outfile[FUNC_H]) << type + " vectorAt" + to_string(vectorFunctions.size()-1) + "(vector<" + type + "> *s, " + "int k);" << endl;
+            *(outfile[FUNC_C]) << type + " vectorAt" + to_string(vectorFunctions.size()-1) + "(vector<" + type + "> *s, " + "int k){" << endl;
+            *(outfile[FUNC_C]) << "    return (*s).at(k);" << endl;
+            *(outfile[FUNC_C]) << "}" << endl;
+            *(outfile[ACT_C]) << type + " vectorAt" + to_string(vectorFunctions.size()-1) + "(vector<" + type + "> *s, " + "int k){" << endl;
+            *(outfile[ACT_C]) << "    return (*s).at(k);" << endl;
+            *(outfile[ACT_C]) << "}" << endl;
+        }
+    }
 }

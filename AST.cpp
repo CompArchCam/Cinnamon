@@ -136,6 +136,12 @@ void CompositeTypeDecl::accept(Visitor& v){
 void FileTypeDecl::accept(Visitor& v){
     v.visit(this);
 }
+void InstTypeDecl::accept(Visitor& v){
+    v.visit(this);
+}
+void BasicblockTypeDecl::accept(Visitor& v){
+    v.visit(this);
+}
 void TypeDeclStmt::accept(Visitor& v){
     v.visit(this);
 }

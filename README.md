@@ -8,6 +8,12 @@ CGO 2021
 
 Please cite this paper if you produce any work that builds upon this code and / or data.
 
+## This branch
+
+Warning, this branch contains an experimental version of Cinnamon that inlines the added code (rather than using clean calls) and adds support for modifying instructions.  Since it is experimental, the syntax of the DSL is in flux and may change without notice, and some features may not work correctly.
+
+These modifications will only work with Janus, not Pin or Dyninst.  To use them you will need to checkout the 'modifying-cinnamon' version of Janus.
+
 ## Licence
 
 Cinnamon is released under an Apache licence.

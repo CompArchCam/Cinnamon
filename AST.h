@@ -423,8 +423,19 @@ class FileTypeDecl: public TypeDecl{
         FileTypeDecl(Identifier* ident): ident(ident){f_var = NULL; f_name = NULL;}
         FileTypeDecl(Identifier* ident, StrConst* f_name): ident(ident), f_name(f_name) {f_var = NULL;}
         //FileTypeDecl(Identifier* ident, StrConst* f_name): ident(ident), f_name(f_name) {f_var = NULL;}
+        void accept(Visitor& v);     
+};
+class InstTypeDecl: public TypeDecl{
+   public: 
+        Identifier* ident;
+        InstTypeDecl(Identifier* ident): ident(ident){}
+        void accept(Visitor& v);     
+};
+class BasicblockTypeDecl: public TypeDecl{
+   public: 
+        Identifier* ident;
+        BasicblockTypeDecl(Identifier* ident): ident(ident){}
         void accept(Visitor& v);
-        
 };
 class CompositeTypeDecl: public TypeDecl{
     public:

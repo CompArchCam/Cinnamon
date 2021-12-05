@@ -22,7 +22,9 @@ enum{
     INIT_C,
     TEMP_C,
     STAT_H,
-    DYN_H
+    DYN_H,
+    ACT_C,
+    AT_C
 };
 typedef struct{
   int type;
@@ -62,7 +64,9 @@ class CodeGen : public Visitor {
     fstream outfile_t;
     fstream outfile_sh;
     fstream outfile_dh;
-    fstream *outfile[10];
+    fstream outfile_ac;
+    fstream outfile_at;
+    fstream *outfile[12];
     int curr;
    public:
         
@@ -156,6 +160,10 @@ class CodeGen : public Visitor {
     
     void visit(FileTypeDecl* ftypedecl);
 
+    void visit(InstTypeDecl* itypedecl);
+
+    void visit(BasicblockTypeDecl* bbtypedecl);
+
     void visit(CommandBlock* cmdblock);
     
     void visit(Action* action);
@@ -163,5 +171,13 @@ class CodeGen : public Visitor {
     void visit(ProgramBlock* prog);
     
     void visit(Component* comp);
+
+    void generateMapFunctions();
+
+    void generateSetFunctions();
+
+    void generateUtilFunctions();
+
+    void generateVectorFunctions();
 };
 #endif

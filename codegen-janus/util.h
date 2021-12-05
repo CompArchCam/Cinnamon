@@ -11,7 +11,7 @@ int ruleID=1;
 
 int mode=0;
 int error_count=0;
-int indentLevel[10]={0,0,0,0,0,0,0,0,0,0};   //separate indent level for each outfile; *_static, *_dynamic, func.cpp, func.h 
+int indentLevel[11]={0,0,0,0,0,0,0,0,0,0,0};   //separate indent level for each outfile; *_static, *_dynamic, func.cpp, func.h 
 map<string,string> get_func[2];
 
 #define DYNAMIC 1
@@ -35,9 +35,10 @@ map<string,string> get_func[2];
 #define RESET_VAR_COUNT                 "var_count = 0;"
 map<int, int> t_location={
         {T_BEFORE, 1},
+        {T_AT, 1},
         {T_AFTER, 2},
-        {T_AT, 3},
         {T_ENTRY, 4},
+        {T_WITH, 4},
         {T_EXIT, 5},
         {T_ITER, 6}
 };
@@ -61,7 +62,28 @@ map<int, string> opcodes={
         {OP_LOAD, "Instruction::Load"},
         {OP_STORE, "Instruction::Store"},
         {OP_GETPTR, "Instruction::GetPointer"},
-        {OP_CMP, "Instruction::Compare"}
+        {OP_CMP, "Instruction::Compare"},
+        {OP_INC, "Instruction::Inc"}
+};
+
+map<int, string> instr_opcodes={
+        {OP_CALL, "OP_call"},
+        {OP_MOV, "OP_mov_imm"},
+        {OP_ADD, "OP_add"},
+        {OP_SUB, "OP_sub"},
+        {OP_MUL, "OP_mul"},
+        {OP_DIV, "OP_div"},
+        {OP_NOP, "OP_nop"},
+        {OP_RETURN, "OP_ret"},
+        {OP_BRANCH, "Instruction::Branch"},
+        {OP_LOAD, "OP_mov_ld"},
+        {OP_STORE, "OP_mov_st"},
+        {OP_GETPTR, "Instruction::GetPointer"},
+        {OP_CMP, "OP_cmp"},
+        {OP_INC, "OP_inc"},
+        {OP_LABEL, "OP_LABEL"},
+        {OP_JNL, "OP_jnl"},
+        {OP_JL, "OP_jl"}
 };
 
 map<string, string> get_static_func = {
@@ -78,9 +100,9 @@ map<string, string> get_static_func = {
         {"bb","get_basicblock("},
         {"size", "get_size("},
         {"parent", "get_parent("},
-        {"dest", "get_dest("},
-        {"src1", "get_src1("},
-        {"src2", "get_src2("},
+        {"dst", "get_dest("},
+        {"src", "get_src2("},
+        {"src2", "get_src3("},
         {"numLoops", "get_num_loops("}
 };
 //TODO: make these specific to component type
@@ -104,9 +126,22 @@ map<string, string> get_dyn_func = {
         {"arg5", "get_arg5("},
         {"arg6", "get_arg6("},
         {"rtnval", "get_return_val("},
-        {"dest", "get_dest("},
-        {"src1", "get_src1("},
-        {"src2", "get_src2("}
+        {"dst", "get_dest("},
+        {"src", "get_src1("},
+        {"src2", "get_src2("},
+        {"replace", "replace(drcontext, bb, "},
+        {"delete", "delete_instr(drcontext, bb, "},
+        {"insert_before", "insert_before(drcontext, bb, "},
+        {"insert_after", "insert_after(drcontext, bb, "},
+        {"print", "print(drcontext, bb, "},
+        {"print_inst", "print_inst(drcontext, bb, "},
+        {"print_bb", "print_bb(drcontext, bb, "},
+        {"clear", "clear_bb(drcontext, bb, "},
+        {"clear_but_last", "clear_bb_but_last(drcontext, bb, "},
+        {"append", "bb_append(drcontext, bb, "},
+        {"prepend", "bb_prepend(drcontext, bb, "},
+        {"replace_bb", "replace_bb(drcontext, bb, "},
+        {"replace_bb_but_last", "replace_bb_but_last(drcontext, bb, "}
 };
 map<string, int> acc_func_dyn_cat = {
         {"val",1},
@@ -137,6 +172,24 @@ map<string,string> types={
         {"reg", "JVAR_REGISTER"},
         {"const", "JVAR_CONSTANT"},
         {"poly", "JVAR_POLYNOMIAL"}
+};
+map<string,string> get_vector_func={
+        {"push_back", "vectorPushback"},
+        {"atpos", "vectorAt"}
+};
+map<string,string> get_set_func={
+        {"count", "setCount"},
+        {"insert", "setInsert"},
+        {"size", "setSize"}
+};
+map<string,string> get_file_func={
+        {"open", "fileOpen"},
+        {"write", "fileWrite"},
+        {"close", "fileClose"}
+};
+map<string,string> get_bb_func={
+        {"append", "bb_append(drcontext, bb, "},
+        {"prepend", "bb_prepend(drcontext, bb, "},
 };
 #endif
 

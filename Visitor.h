@@ -50,6 +50,8 @@ public:
         virtual void visit(TupleType* tuple) =0;
         virtual void visit(PrimitiveTypeDecl* ptypedecl) =0;
         virtual void visit(FileTypeDecl* ftypedecl) =0;
+        virtual void visit(InstTypeDecl* itypedecl) =0;
+        virtual void visit(BasicblockTypeDecl* itypedecl) =0;
         virtual void visit(CompositeTypeDecl* ctypedecl) =0;
         virtual void visit(CommandBlock* cmdblock) =0;
         virtual void visit(Action* action) =0;

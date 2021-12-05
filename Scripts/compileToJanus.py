@@ -15,12 +15,24 @@ if len(sys.argv) != 2:
 
 #Step 1: Invoke DSL parser and generator
 dslFile = sys.argv[1]
-fileName = os.path.splitext(dslFile)[0];
+fileName = os.path.splitext(dslFile)[0]
 
 os.system(parserPATH + '/bdc ' + dslFile)  
 
+#Step 2: Call clang compiler to generate assembly code for actions
+os.system('clang++ -fno-stack-protector -fomit-frame-pointer -fno-asynchronous-unwind-tables -S '+ fileName + '.cpp -o ' + fileName + '.s')
 
-#Step 2: Start moving code to Janus
+#Step 3: Parse assembly code to take useful ones, and transform them into DynamoRio functions
+print "Start parsing assembly code, output file to" + fileName + ".instr"
+os.system(parserPATH + '/parse-assembly/assem.o ' + fileName)
+print "End parsing assembly code\n"
+
+#Step 4 Insert DynamoRio Macros into correct places
+print "Start inserting DynamoRio Macros into .dyn file"
+os.system(parserPATH + '/parse-assembly/wrtodyn.o ' + fileName)
+print "End inserting DynamoRio Macros into .dyn file\n"
+
+#Step 5: Start moving code to Janus
 with open(fileName+".stat", 'r') as static_file:
 	code = static_file.read();
 	code = '/*--- Static RuleGen Start ---*/\n'+code+'\n/*--- Static RuleGen Finish ---*/'
